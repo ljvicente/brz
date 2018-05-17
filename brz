@@ -1,0 +1,93 @@
+#!/usr/bin/php
+<?php
+
+if (! isset($argv[1])) {
+    echo "No directory specified";
+    die();
+}
+
+// get sizes
+$layout = isset($argv[2]) ? escapeshellarg($argv[2]) : 'rectangle';
+switch ($layout) {
+    case 'square':
+        $inner = "1000x1000";
+        $outer = "1200x1200";
+        break;
+    case 'rectangle':
+        $inner = "800x1100";
+        $outer = "1000x1300";
+        break;
+    default:
+        $inner = "800x1100";
+        $outer = "1000x1300";
+
+        if (isset($argv[2])) {
+            $sizes = explode(',', $layout);
+            if (isset($sizes[0]) && isset($sizes[1])) {
+                $inner = $sizes[0];
+                $outer = $sizes[1];
+            }
+        }
+        break;
+}
+
+$summary = [];
+
+$dir = new RecursiveDirectoryIterator($argv[1]);
+foreach (new RecursiveIteratorIterator($dir) as $filename => $file) {
+    if (! $file->isDir()) {
+        echo "[Found]: $filename\n";
+
+        // skip if file is not an image
+        if (! getimagesize($filename)) {
+            echo "[Skipping]: $filename\n";
+            continue;
+        }
+
+        // convert extension names to lower case
+        $ext = strtolower(pathinfo($filename)['extension']);
+        $fn = pathinfo($filename)['filename'];
+        $dn = pathinfo($filename)['dirname'];
+
+        $lower_name = "{$dn}/{$fn}.{$ext}";
+
+        // rename file
+        rename($filename, $lower_name);
+
+        // convert to jpg
+        if ($ext != 'jpg') {
+            echo "[Converting to JPG]: {$lower_name}\n";
+            shell_exec("mogrify -format jpg -background white -colorspace sRGB \"{$lower_name}\"");
+            unlink($lower_name);
+
+            $lower_name =  "{$dn}/{$fn}.jpg";
+        }
+
+        // trim and resize
+        echo "[Trimmed and Resized]: {$lower_name}\n";
+        shell_exec("mogrify -fuzz 15% -trim +repage \"{$lower_name}\" && mogrify -resize {$inner} \"{$lower_name}\" && mogrify -extent {$outer} -gravity Center -fill white \"{$lower_name}\"
+        ");
+
+        // optimize output
+        echo "[Optimizing]: " . shell_exec("jpegoptim --max=90 --strip-all --preserve --totals \"{$lower_name}\"") . "\n";
+
+        // count all the images that has been resize by directory
+        if (! isset($summary[$dn])) {
+            $summary[$dn] = 1;
+        } else {
+            $summary[$dn]++;
+        }
+    }
+}
+
+echo "+---------------------------------------+\n";
+echo "|                SUMMARY                |\n";
+echo "+---------------------------------------+\n";
+
+$total = 0;
+foreach ($summary as $folder => $count) {
+    echo "{$folder}:\t{$count}\n";
+    $total += $count;
+}
+
+echo "[TOTAL IMAGES PROCESSED]:\t{$total}\n";
